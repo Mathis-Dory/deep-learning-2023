@@ -161,3 +161,8 @@ cython_debug/
 !/mod*/mod*.hdf5
 
 
+/data/
+/models/*/*.hdf5
+/models/*/*.h5
+/test_dir/
+/working_dir/

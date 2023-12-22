@@ -14,6 +14,7 @@ from keras.models import load_model
 from keras.preprocessing.image import ImageDataGenerator, DirectoryIterator
 from keras.utils import set_random_seed
 
+current_dir = os.path.dirname(__file__)
 set_random_seed(42)
 
 img_height, img_width = 64, 64
@@ -71,16 +72,16 @@ def structure_data(df: pd.DataFrame, dir_type: str) -> None:
         class_label = str(row['Class'])  # Convert class label to string
         class_dir = f"{working_dir}/{dir_type}/{class_label}"
         os.makedirs(class_dir, exist_ok=True)
-        src = os.path.join('data', dir_type, image_filename)
-        dest = os.path.join(class_dir, image_filename)
+        src = f'{dir_type}/{image_filename}'
+        dest = f'{class_dir}/{image_filename}'
         shutil.copyfile(src, dest)
     logging.info(f"Finished structuring {dir_type} data")
 
 
 def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, float, float):
-    working_train = 'working_dir/train_images'
-    working_val = 'working_dir/val_images'
-    test_dir = 'test_dir'
+    working_train = os.path.join(current_dir, 'working_dir', 'data', 'train_images')
+    working_val = os.path.join(current_dir, 'working_dir', 'data','val_images')
+    test_dir = os.path.join(current_dir, 'test_dir')
     train_generator = ImageDataGenerator(
         rescale=1. / 255,
         rotation_range=10,

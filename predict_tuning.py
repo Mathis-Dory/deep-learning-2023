@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,6 +13,7 @@ from keras.preprocessing.image import ImageDataGenerator, DirectoryIterator
 from keras.utils import set_random_seed
 from sklearn.metrics import confusion_matrix
 
+current_dir = os.path.dirname(__file__)
 set_random_seed(42)
 
 img_height, img_width = 64, 64
@@ -52,10 +54,24 @@ def init() -> None:
 
     plt.show()
 
+def structure_data(df: pd.DataFrame, dir_type: str) -> None:
+    working_dir = 'working_dir'
+    os.makedirs(working_dir, exist_ok=True)
+    for index, row in df.iterrows():
+        image_filename = row['Image']
+        class_label = str(row['Class'])  # Convert class label to string
+        class_dir = f"{working_dir}/{dir_type}/{class_label}"
+        os.makedirs(class_dir, exist_ok=True)
+        src = f'{dir_type}/{image_filename}'
+        dest = f'{class_dir}/{image_filename}'
+        shutil.copyfile(src, dest)
+    logging.info(f"Finished structuring {dir_type} data")
+
+
 def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, float, float):
-    working_train = 'working_dir/train_images'
-    working_val = 'working_dir/val_images'
-    test_dir = 'test_dir'
+    working_train = os.path.join(current_dir, 'working_dir', 'data', 'train_images')
+    working_val = os.path.join(current_dir, 'working_dir', 'data','val_images')
+    test_dir = os.path.join(current_dir, 'test_dir')
     train_generator = ImageDataGenerator(
         rescale=1. / 255,
         rotation_range=10,
