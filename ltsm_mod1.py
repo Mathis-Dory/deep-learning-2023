@@ -150,7 +150,7 @@ def create_model() -> None:
     model.add(Flatten())
 
     # Dense layers for classification
-    model.add(Dense(128, activation="relu", kernel_initializer=VarianceScaling(),
+    model.add(Dense(256, activation="relu", kernel_initializer=VarianceScaling(),
                     kernel_regularizer="l2", activity_regularizer="l2"))
     model.add(Dropout(0.2))
     model.add(Dense(100, activation="softmax"))  # Adjust the number of units to match the number of classes

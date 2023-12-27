@@ -6,16 +6,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PIL import Image
-from keras.callbacks import EarlyStopping, ModelCheckpoint,ReduceLROnPlateau
+from keras import Sequential
+from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from keras.initializers import VarianceScaling
 from keras.layers import Conv2D, MaxPooling2D
 from keras.layers import Dense, Dropout, Flatten, BatchNormalization, GlobalAveragePooling2D
-from keras.models import Sequential
 from keras.models import load_model
 from keras.preprocessing.image import ImageDataGenerator, DirectoryIterator
 from keras.utils import set_random_seed
-from keras import layers, Sequential
-from keras.optimizers import Adam
 
 set_random_seed(42)
 
@@ -39,7 +37,7 @@ def init() -> None:
 
     # Plot 4 random images from training set with their
     random_indices = df_train.sample(n=4).index
-    plt.figure(figsize=(12, 10))
+    plt.figure(figsize=(20, 15))
     for i, idx in enumerate(random_indices):
         image_name = df_train.loc[idx, 'Image']
         image_class = df_train.loc[idx, 'Class']
@@ -49,10 +47,12 @@ def init() -> None:
 
         plt.subplot(2, 2, i + 1)
         plt.imshow(image)
-        plt.title(f"{image_name} | Class: {image_class}")
+        plt.title(f"{image_name} | Class: {image_class}", pad=10, fontsize=10)  # Add padding to the title
         plt.axis('off')
 
-    plt.tight_layout(pad=3.0)
+    # Adjust subplot parameters
+    plt.subplots_adjust(hspace=0.3, wspace=0.9)  # Increase horizontal and vertical spacing
+
     plt.show()
 
 
@@ -86,12 +86,12 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
     test_dir = 'test_dir'
     train_generator = ImageDataGenerator(
         rescale=1. / 255,
-        rotation_range=20,
+        rotation_range=10,
         width_shift_range=0.2,
         height_shift_range=0.2,
-        shear_range=0.2,
         zoom_range=0.2,
-        horizontal_flip=True
+        horizontal_flip=True,
+        vertical_flip=False,
     )
     val_generator = ImageDataGenerator(
         rescale=1. / 255,
@@ -130,25 +130,26 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
 
 
 def create_model() -> None:
-
     model = Sequential()
-    model.add(Conv2D(256, (5, 5), padding='same', input_shape=(img_height, img_width, 3), activation='relu'))
+    model.add(Conv2D(128, (3, 3), padding='same', input_shape=(img_height, img_width, 3), activation='relu'))
     model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Dropout(0.2)),
-    model.add(Conv2D(512, (3, 3), activation='relu'))
+    model.add(Dropout(0.2))
+
+    model.add(Conv2D(256, (3, 3), activation='relu', padding='same'))
     model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2)))
-    model.add(Dropout(0.2)),
-    model.add(Conv2D(512, (3, 3), activation='relu'))
+    model.add(Dropout(0.2))
+
+    model.add(Conv2D(512, (3, 3), activation='relu', padding='same'))
     model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2)))
-    model.add(Dropout(0.2)),
-    model.add(BatchNormalization()),
-    model.add(GlobalAveragePooling2D()),
+    model.add(Dropout(0.2))
+
+    model.add(BatchNormalization())
+    model.add(GlobalAveragePooling2D())
     model.add(Flatten())
-    model.add(Dense(128, activation="relu", kernel_initializer=VarianceScaling,
+    model.add(Dense(128, activation="relu", kernel_initializer=VarianceScaling(),
                     kernel_regularizer="l2", activity_regularizer="l2"))
     model.add(Dropout(0.2)),
     model.add(Dense(100, activation="softmax"))
-
 
     model.summary()
 
@@ -163,13 +164,15 @@ def create_model() -> None:
         verbose=1,
         save_best_only=True,
     )
-    early = EarlyStopping(patience=6, restore_best_weights="True", monitor="val_loss")
+    early = EarlyStopping(patience=10, restore_best_weights="True", monitor="val_loss")
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=0.001)
     callbacks = [checkpoint, early, reduce_lr]
     history = model.fit(
         train_gen,
-        epochs=128,
+        epochs=100,
+        steps_per_epoch=len(train_gen),
         validation_data=val_gen,
+        validation_steps=len(val_gen),
         verbose=1,
         batch_size=batch_size,
         shuffle=True,
@@ -189,17 +192,17 @@ def create_model() -> None:
     epochs = range(1, len(acc) + 1)
 
     plt.plot(epochs, loss, 'bo', label='Training loss')
-    plt.plot(epochs, val_loss, 'b', label='Validation loss')
+    plt.plot(epochs, val_loss, 'ro', label='Validation loss')
     plt.title('Training and validation loss')
     plt.legend()
-    plt.savefig(f"models/{model_name}/loss.png",  format="png", dpi=1200)
+    plt.savefig(f"models/{model_name}/loss.png", format="png", dpi=1200)
     plt.figure()
 
     plt.plot(epochs, acc, 'bo', label='Training acc')
-    plt.plot(epochs, val_acc, 'b', label='Validation acc')
+    plt.plot(epochs, val_acc, 'ro', label='Validation acc')
     plt.title('Training and validation accuracy')
     plt.legend()
-    plt.savefig(f"models/{model_name}/accuracy.png",  format="png", dpi=1200)
+    plt.savefig(f"models/{model_name}/accuracy.png", format="png", dpi=1200)
     plt.figure()
     plt.show()
 
@@ -250,8 +253,12 @@ if __name__ == "__main__":
                          "script again.")
         exit(0)
     else:
-        model_name = "mod14"
+
+        model_name = "mod14_bis"
         os.makedirs(f"models/{model_name}", exist_ok=True)
         train_gen, val_gen, test_generator = preprocess()
         create_model()
         predict()
+
+# val_loss: 1.2103360891342163
+# val_acc: 0.722000002861023

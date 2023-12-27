@@ -21,7 +21,7 @@ from kerastuner.tuners import RandomSearch
 set_random_seed(42)
 
 img_height, img_width = 64, 64
-batch_size = 64
+batch_size = 32
 train_path = "./data/train_images/"
 val_path = "./data/val_images/"
 test_path = "./data/test_images/"
@@ -89,13 +89,14 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
     test_dir = 'test_dir'
     train_generator = ImageDataGenerator(
         rescale=1. / 255,
-        rotation_range=40,
-        width_shift_range=0.1,
-        height_shift_range=0.1,
-        shear_range=0.2,
-        zoom_range=0.2,
+        rotation_range=20,
+        brightness_range=[0.8, 1.2],
+        zoom_range=0.3,
+        vertical_flip=True,
+        width_shift_range=0.2,
+        height_shift_range=0.2,
         horizontal_flip=True,
-        fill_mode='nearest'
+        fill_mode='nearest',
     )
     val_generator = ImageDataGenerator(rescale=1. / 255, )
     test_generator = ImageDataGenerator(rescale=1. / 255)
@@ -137,30 +138,22 @@ class CNNHyperModel(HyperModel):
 
     def build(self, hp) -> Sequential:
         model = Sequential()
-        model.add(Conv2D(filters=hp.Choice('filters_1', values=[32, 64, 128]), activation='relu',
+        model.add(Conv2D(filters=hp.Choice('filters_1', values=[32, 64, 128]), activation='relu', padding='same',
                          kernel_size=hp.Choice('kernel_1', values=[3, 5, 7]), input_shape=(img_width, img_height, 3)))
-        model.add(BatchNormalization())
-        model.add(Conv2D(filters=hp.Choice('filters_2', values=[32, 64, 128]), activation='relu',
-                         kernel_size=hp.Choice('kernel_2', values=[3, 5, 7]), padding='same'))
-        model.add(BatchNormalization())
         model.add(MaxPooling2D(pool_size=(2, 2), strides=hp.Choice('strides_1', values=[1, 2])))
         model.add(Dropout(rate=hp.Float('dropout_1', min_value=0, max_value=0.3, step=0.1)))
 
-        model.add(Conv2D(filters=hp.Choice('filters_3', values=[32, 64, 128, 256]), activation='relu',
-                         kernel_size=hp.Choice('kernel_3', values=[3, 5]), padding='same'))
-        model.add(BatchNormalization())
-        model.add(Conv2D(filters=hp.Choice('filters_4', values=[32, 64, 128, 256]), activation='relu',
-                         kernel_size=hp.Choice('kernel_4', values=[3, 5]), padding='same'))
-        model.add(BatchNormalization())
+        model.add(Conv2D(filters=hp.Choice('filters_2', values=[32, 64, 128, 256]), activation='relu',
+                         kernel_size=hp.Choice('kernel_2', values=[3, 5]), padding='same'))
         model.add(MaxPooling2D(pool_size=(2, 2), strides=hp.Choice('strides_2', values=[1, 2])))
         model.add(Dropout(rate=hp.Float('dropout_2', min_value=0, max_value=0.3, step=0.1)))
 
-        model.add(Conv2D(filters=hp.Choice('filters_5', values=[32, 64, 128, 256]), activation='relu',
-                         kernel_size=hp.Choice('kernel_5', values=[3, 5]), padding='same'))
-        model.add(BatchNormalization())
+        model.add(Conv2D(filters=hp.Choice('filters_3', values=[32, 64, 128, 256, 512]), activation='relu',
+                         kernel_size=hp.Choice('kernel_3', values=[3, 5]), padding='same'))
         model.add(MaxPooling2D(pool_size=(2, 2), strides=hp.Choice('strides_3', values=[1, 2])))
         model.add(Dropout(rate=hp.Float('dropout_3', min_value=0, max_value=0.3, step=0.1)))
 
+        model.add(BatchNormalization())
         pooling_choice = hp.Choice('pooling', values=['flatten', 'global_max_pooling', 'global_avg_pooling'])
         if pooling_choice == 'flatten':
             model.add(Flatten())
@@ -169,7 +162,13 @@ class CNNHyperModel(HyperModel):
         elif pooling_choice == 'global_avg_pooling':
             model.add(GlobalAveragePooling2D())
 
-        model.add(Dense(units=hp.Choice('dense_units', values=[64, 128, 256]), activation='relu',
+        if hp.Boolean('Dense_sup'):  # This will either be True or False during tuning
+            model.add(Dense(units=hp.Choice('dense_units_sup', values=[128, 256, 512]), activation='relu',
+                            kernel_initializer=VarianceScaling(),
+                            kernel_regularizer=l2(), activity_regularizer=l2()))
+            model.add(Dropout(rate=hp.Float('dropout_sup', min_value=0.0, max_value=0.5, step=0.1)))
+
+        model.add(Dense(units=hp.Choice('dense_final', values=[128, 256, 512]), activation='relu',
                         kernel_initializer=VarianceScaling(),
                         kernel_regularizer=l2(), activity_regularizer=l2()))
         model.add(Dropout(rate=hp.Choice(f'dropout_final', values=[0.0, 0.3, 0.5])))
@@ -237,3 +236,46 @@ if __name__ == "__main__":
         train_gen, val_gen, test_generator = preprocess()
         hypermodel = CNNHyperModel(img_height=img_height, img_width=img_width)
         find_best(train_gen, val_gen)
+
+#
+# _________________________________________________________________
+# Layer (type)                Output Shape              Param #
+# =================================================================
+# conv2d (Conv2D)             (None, 64, 64, 128)       18944
+#
+# max_pooling2d (MaxPooling2  (None, 32, 32, 128)       0
+# D)
+#
+# dropout (Dropout)           (None, 32, 32, 128)       0
+#
+# conv2d_1 (Conv2D)           (None, 32, 32, 32)        102432
+#
+# max_pooling2d_1 (MaxPoolin  (None, 16, 16, 32)        0
+# g2D)
+#
+# dropout_1 (Dropout)         (None, 16, 16, 32)        0
+#
+# conv2d_2 (Conv2D)           (None, 16, 16, 512)       410112
+#
+# max_pooling2d_2 (MaxPoolin  (None, 15, 15, 512)       0
+# g2D)
+#
+# dropout_2 (Dropout)         (None, 15, 15, 512)       0
+#
+# batch_normalization (Batch  (None, 15, 15, 512)       2048
+# Normalization)
+#
+# global_average_pooling2d (  (None, 512)               0
+# GlobalAveragePooling2D)
+#
+# dense (Dense)               (None, 128)               65664
+#
+# dropout_3 (Dropout)         (None, 128)               0
+#
+# dense_1 (Dense)             (None, 100)               12900
+#
+# =================================================================
+# Total params: 612100 (2.33 MB)
+# Trainable params: 611076 (2.33 MB)
+# Non-trainable params: 1024 (4.00 KB)
+# _________________________________________________________________

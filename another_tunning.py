@@ -3,22 +3,25 @@ import os
 import shutil
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 from PIL import Image
 from keras import Sequential
-from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+from keras.callbacks import EarlyStopping
 from keras.initializers import VarianceScaling
 from keras.layers import Conv2D, MaxPooling2D
-from keras.layers import Dense, Dropout, Flatten, BatchNormalization, GlobalAveragePooling2D
-from keras.models import load_model
+from keras.layers import Dense, Dropout, BatchNormalization, GlobalMaxPooling2D, GlobalAveragePooling2D, \
+    Flatten
+from keras.optimizers.legacy import Adam
 from keras.preprocessing.image import ImageDataGenerator, DirectoryIterator
+from keras.regularizers import l2
 from keras.utils import set_random_seed
+from kerastuner import HyperModel
+from kerastuner.tuners import RandomSearch
 
 set_random_seed(42)
 
 img_height, img_width = 64, 64
-batch_size = 128
+batch_size = 32
 train_path = "./data/train_images/"
 val_path = "./data/val_images/"
 test_path = "./data/test_images/"
@@ -87,16 +90,16 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
     train_generator = ImageDataGenerator(
         rescale=1. / 255,
         rotation_range=20,
+        brightness_range=[0.8, 1.2],
+        zoom_range=0.3,
+        vertical_flip=True,
         width_shift_range=0.2,
         height_shift_range=0.2,
-        shear_range=0.2,
-        zoom_range=0.2,
-        horizontal_flip=True
+        horizontal_flip=True,
+        fill_mode='nearest',
     )
-    val_generator = ImageDataGenerator(
-        rescale=1. / 255,
-
-    )
+    val_generator = ImageDataGenerator(rescale=1. / 255, )
+    test_generator = ImageDataGenerator(rescale=1. / 255)
     train_gen = train_generator.flow_from_directory(
         working_train,
         target_size=(img_height, img_width),
@@ -117,8 +120,7 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
         class_mode='categorical'
     )
 
-    test_datagen = ImageDataGenerator(rescale=1. / 255)
-    test_generator = test_datagen.flow_from_directory(
+    test_gen = test_generator.flow_from_directory(
         test_dir,
         target_size=(img_height, img_width),
         batch_size=batch_size,
@@ -126,84 +128,82 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
         shuffle=False  # Ensure that the order of predictions matches file order
     )
 
-    return train_gen, val_gen, test_generator
+    return train_gen, val_gen, test_gen
 
 
-def create_model() -> None:
+class CNNHyperModel(HyperModel):
+    def __init__(self, img_height, img_width):
+        self.img_height = img_height
+        self.img_width = img_width
 
-    model = Sequential()
-    model.add(Conv2D(128, (5, 5), padding='same', input_shape=(img_height, img_width, 3), activation='relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Dropout(0.2)),
-    model.add(Conv2D(256, (3, 3), activation='relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2)))
-    model.add(Dropout(0.2)),
-    model.add(Conv2D(512, (3, 3), activation='relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2)))
-    model.add(Dropout(0.2)),
-    model.add(BatchNormalization()),
-    model.add(GlobalAveragePooling2D()),
-    model.add(Flatten())
-    model.add(Dense(128, activation="relu", kernel_initializer=VarianceScaling(),
-                    kernel_regularizer="l2", activity_regularizer="l2"))
-    model.add(Dropout(0.2)),
-    model.add(Dense(100, activation="softmax"))
+    def build(self, hp) -> Sequential:
+        model = Sequential()
+        model.add(Conv2D(filters=hp.Choice('filters_1', values=[32,64, 128]), activation='relu', padding=hp.Choice('padding_1', values=['same', 'valid']),
+                         kernel_size=hp.Choice('kernel_1', values=[3, 5]), input_shape=(img_width, img_height, 3)))
+        model.add(MaxPooling2D(pool_size=(2, 2), strides=hp.Choice('strides_1', values=[1, 2])))
+        model.add(Dropout(rate=hp.Float('dropout_1', min_value=0, max_value=0.3, step=0.1)))
+
+        model.add(Conv2D(filters=hp.Choice('filters_2', values=[64, 128, 256]), activation='relu',
+                         kernel_size=hp.Choice('kernel_2', values=[3, 5]), padding=hp.Choice('padding_2', values=['same', 'valid'])))
+        model.add(MaxPooling2D(pool_size=(2, 2), strides=hp.Choice('strides_2', values=[1, 2])))
+        model.add(Dropout(rate=hp.Float('dropout_2', min_value=0, max_value=0.3, step=0.1)))
+
+        model.add(Conv2D(filters=hp.Choice('filters_3', values=[64, 128, 256, 512]), activation='relu',
+                         kernel_size=hp.Choice('kernel_3', values=[3, 5]), padding=hp.Choice('padding_3', values=['same', 'valid'])))
+        model.add(MaxPooling2D(pool_size=(2, 2), strides=hp.Choice('strides_3', values=[1, 2])))
+        model.add(Dropout(rate=hp.Float('dropout_3', min_value=0, max_value=0.3, step=0.1)))
+
+        model.add(BatchNormalization())
+        pooling_choice = hp.Choice('pooling', values=['global_max_pooling', 'global_avg_pooling'])
+        if pooling_choice == 'global_max_pooling':
+            model.add(GlobalMaxPooling2D())
+        elif pooling_choice == 'global_avg_pooling':
+            model.add(GlobalAveragePooling2D())
+
+        model.add(Flatten())
+        if hp.Boolean('Dense_sup'):  # This will either be True or False during tuning
+            model.add(Dense(units=hp.Choice('dense_units_sup', values=[128, 256, 512]), activation='relu',
+                            kernel_initializer=VarianceScaling(),
+                            kernel_regularizer=l2(), activity_regularizer=l2()))
+            model.add(Dropout(rate=hp.Float('dropout_sup', min_value=0.0, max_value=0.5, step=0.1)))
+
+        model.add(Dense(units=hp.Choice('dense_final', values=[128, 256, 512]), activation='relu',
+                        kernel_initializer=VarianceScaling(),
+                        kernel_regularizer=l2(), activity_regularizer=l2()))
+        model.add(Dropout(rate=hp.Choice(f'dropout_final', values=[0.0, 0.3, 0.5])))
+
+        # Output layer
+        model.add(Dense(100, activation="softmax"))
+
+        model.compile(
+            optimizer=Adam(learning_rate=1e-3),
+            loss='categorical_crossentropy',
+            metrics=['accuracy']
+        )
+
+        return model
 
 
-    model.summary()
-
-    model.compile(optimizer='adam', loss="categorical_crossentropy", metrics=["accuracy"])
-    logging.info(f"Model compiled {val_gen.class_indices}")
-
-    filepath = f"models/{model_name}/{model_name}.hdf5"
-    checkpoint = ModelCheckpoint(
-        filepath=filepath,
-        monitor="val_accuracy",
-        mode="max",
-        verbose=1,
-        save_best_only=True,
+def find_best(train_gen, val_gen):
+    tuner = RandomSearch(
+        hypermodel,
+        objective='val_accuracy',
+        max_trials=15,
+        directory='keras_tuner_dir',
+        seed=42,
+        project_name='another_tunner'
     )
-    early = EarlyStopping(patience=6, restore_best_weights="True", monitor="val_loss")
-    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=0.001)
-    callbacks = [checkpoint, early, reduce_lr]
-    history = model.fit(
-        train_gen,
-        epochs=64,
-        steps_per_epoch=len(train_gen),
-        validation_data=val_gen,
-        validation_steps=len(val_gen),
-        verbose=1,
-        batch_size=batch_size,
-        shuffle=True,
-        callbacks=callbacks,
-    )
-    val_loss, val_acc = \
-        model.evaluate(val_gen, steps=len(df_val))
+    # Callbacks
+    early_stopping = EarlyStopping(monitor='val_loss', patience=5)
+    callbacks = [early_stopping]
+    tuner.search(train_gen,
+                 epochs=20,
+                 validation_data=val_gen,
+                 callbacks=callbacks)
 
-    print('val_loss:', val_loss)
-    print('val_acc:', val_acc)
-
-    acc = history.history['accuracy']
-    val_acc = history.history['val_accuracy']
-    loss = history.history['loss']
-    val_loss = history.history['val_loss']
-
-    epochs = range(1, len(acc) + 1)
-
-    plt.plot(epochs, loss, 'bo', label='Training loss')
-    plt.plot(epochs, val_loss, 'b', label='Validation loss')
-    plt.title('Training and validation loss')
-    plt.legend()
-    plt.savefig(f"models/{model_name}/loss.png",  format="png", dpi=1200)
-    plt.figure()
-
-    plt.plot(epochs, acc, 'bo', label='Training acc')
-    plt.plot(epochs, val_acc, 'b', label='Validation acc')
-    plt.title('Training and validation accuracy')
-    plt.legend()
-    plt.savefig(f"models/{model_name}/accuracy.png",  format="png", dpi=1200)
-    plt.figure()
-    plt.show()
+    best_model = tuner.get_best_models(num_models=1)[0]
+    best_model.save(f'models/{model_name}/best_model_tuned.h5')
+    best_model.summary()
 
 
 def prepare_test() -> None:
@@ -218,29 +218,6 @@ def prepare_test() -> None:
         shutil.copyfile(src, dst)
 
 
-def predict() -> None:
-    model = load_model(f"models/{model_name}/{model_name}.hdf5")
-    predictions = model.predict(test_generator, steps=len(test_generator), verbose=1)
-    predicted_classes = np.argmax(predictions, axis=1)
-    class_labels = list(train_gen.class_indices.keys())
-    image_names = []
-    predicted_classes_list = []
-
-    # Prepare data for DataFrame
-    for i, file_name in enumerate(test_generator.filenames):
-        image_name = os.path.basename(file_name)
-        predicted_class = class_labels[predicted_classes[i]]
-        image_names.append(image_name)
-        predicted_classes_list.append(predicted_class)
-
-    data = {'Image': image_names, 'Class': predicted_classes_list}
-    df_preds = pd.DataFrame(data)
-
-    # Save DataFrame to CSV
-
-    df_preds.to_csv(f"models/{model_name}/submission-{model_name}.csv", index=False, columns=['Image', 'Class'])
-
-
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     init()
@@ -253,8 +230,8 @@ if __name__ == "__main__":
         exit(0)
     else:
 
-        model_name = "mod13"
+        model_name = "another_tunning"
         os.makedirs(f"models/{model_name}", exist_ok=True)
         train_gen, val_gen, test_generator = preprocess()
-        create_model()
-        predict()
+        hypermodel = CNNHyperModel(img_height=img_height, img_width=img_width)
+        find_best(train_gen, val_gen)

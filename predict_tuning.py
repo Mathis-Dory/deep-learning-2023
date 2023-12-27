@@ -17,7 +17,7 @@ current_dir = os.path.dirname(__file__)
 set_random_seed(42)
 
 img_height, img_width = 64, 64
-batch_size = 64
+batch_size = 128
 train_path = "./data/train_images/"
 val_path = "./data/val_images/"
 test_path = "./data/test_images/"
@@ -69,8 +69,8 @@ def structure_data(df: pd.DataFrame, dir_type: str) -> None:
 
 
 def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, float, float):
-    working_train = os.path.join(current_dir, 'working_dir', 'data', 'train_images')
-    working_val = os.path.join(current_dir, 'working_dir', 'data','val_images')
+    working_train = os.path.join(current_dir, 'working_dir', 'train_images')
+    working_val = os.path.join(current_dir, 'working_dir','val_images')
     test_dir = os.path.join(current_dir, 'test_dir')
     train_generator = ImageDataGenerator(
         rescale=1. / 255,
