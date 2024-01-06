@@ -6,21 +6,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PIL import Image
-import tensorflow_addons as tfa
 from keras import Sequential
 from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from keras.initializers import VarianceScaling
 from keras.layers import Conv2D, MaxPooling2D
-from keras.layers import Dense, Dropout, Flatten, BatchNormalization, GlobalAveragePooling2D, Add, Input
-from keras.models import load_model, Model
+from keras.layers import Dense, Dropout, Flatten, BatchNormalization, GlobalAveragePooling2D, GlobalMaxPooling2D
+from keras.models import load_model
 from keras.preprocessing.image import ImageDataGenerator, DirectoryIterator
-from keras.src.regularizers import l2
 from keras.utils import set_random_seed
 
 set_random_seed(42)
 
 img_height, img_width = 64, 64
-batch_size = 64
+batch_size = 128
 train_path = "./data/train_images/"
 val_path = "./data/val_images/"
 test_path = "./data/test_images/"
@@ -88,14 +86,13 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
     test_dir = 'test_dir'
     train_generator = ImageDataGenerator(
         rescale=1. / 255,
-        rotation_range=15,
-        brightness_range=[0.8, 1.2],
-        zoom_range=0.3,
-        vertical_flip=False,
+        rotation_range=10,
         width_shift_range=0.2,
         height_shift_range=0.2,
+        zoom_range=0.2,
+        brightness_range=[0.8, 1.2],
         horizontal_flip=True,
-        fill_mode='nearest',
+        vertical_flip=False,
     )
     val_generator = ImageDataGenerator(
         rescale=1. / 255,
@@ -106,7 +103,6 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
         target_size=(img_height, img_width),
         batch_size=batch_size,
         class_mode='categorical',
-        shuffle=True
     )
     batch = train_gen.next()
 
@@ -135,47 +131,28 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
 
 
 def create_model() -> None:
-    # Input layer
-    input_img = Input(shape=(64, 64, 3))
+    model = Sequential()
+    model.add(Conv2D(256, (3, 3), padding='same', input_shape=(img_height, img_width, 3), activation='relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2)))
+    model.add(Dropout(0.2))
 
-    # First convolutional block
-    x1 = Conv2D(128, (5, 5), padding='same', activation='relu')(input_img)
-    x1 = MaxPooling2D(pool_size=(2, 2))(x1)
-    x1 = Dropout(0.2)(x1)
+    model.add(Conv2D(512, (3, 3), activation='relu', padding='same'))
+    model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2)))
+    model.add(Dropout(0.2))
 
-    # Second convolutional block
-    x2 = Conv2D(256, (3, 3), padding='same', activation='relu')(x1)
-    x2 = MaxPooling2D(pool_size=(2, 2))(x2)
-    x2 = Dropout(0.2)(x2)
+    model.add(Conv2D(512, (3, 3), activation='relu', padding='same'))
+    model.add(MaxPooling2D(pool_size=(2, 2), strides=(1, 1)))
+    model.add(Dropout(0.2))
 
-    # Third convolutional block
-    x3 = Conv2D(256, (3, 3), padding='same', activation='relu')(x2)
-    x3 = MaxPooling2D(pool_size=(2, 2))(x3)
-    x3 = Dropout(0.2)(x3)
-    x3 = BatchNormalization()(x3)
+    model.add(BatchNormalization())
+    model.add(GlobalAveragePooling2D())
+    model.add(Flatten())
 
-    # Adjust x1_skip to match the dimensions of x3
-    x1_skip = Conv2D(256, (1, 1), strides=(2, 2))(x1)  # Adjust depth to 256 and stride
-    x1_skip = MaxPooling2D(pool_size=(2, 2))(x1_skip)  # Additional pooling to match dimensions
+    model.add(Dense(128, activation="relu", kernel_initializer=VarianceScaling(),
+                    kernel_regularizer="l2", activity_regularizer="l2"))
+    model.add(Dropout(0.3)),
+    model.add(Dense(100, activation="softmax"))
 
-    x3 = Add()([x3, x1_skip])
-
-    # Global Average Pooling
-    x3 = GlobalAveragePooling2D()(x3)
-
-    # Fully connected layers
-    x3 = Flatten()(x3)
-    x3 = Dense(128, activation="relu", kernel_initializer=VarianceScaling(), kernel_regularizer=l2(), activity_regularizer=l2())(x3)
-    x3 = Dropout(0.2)(x3)
-    output = Dense(100, activation="softmax")(x3)
-
-    # Create model
-    model = Model(inputs=input_img, outputs=output)
-
-    # Compile model
-    model.compile(optimizer='adam', loss="categorical_crossentropy", metrics=["accuracy"])
-
-    # Model summary
     model.summary()
 
     model.compile(optimizer='adam', loss="categorical_crossentropy", metrics=["accuracy"])
@@ -279,11 +256,10 @@ if __name__ == "__main__":
         exit(0)
     else:
 
-        model_name = "cnn_advanced"
+        model_name = "cnn_basic"
         os.makedirs(f"models/{model_name}", exist_ok=True)
         train_gen, val_gen, test_generator = preprocess()
         create_model()
         predict()
 
-# val_loss: 1.4255516529083252
-# val_acc: 0.6725000143051147
+

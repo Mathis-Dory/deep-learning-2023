@@ -6,19 +6,24 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PIL import Image
-from keras import Sequential
-from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras.initializers import VarianceScaling
 from keras.layers import Conv2D, MaxPooling2D
-from keras.layers import Dense, Dropout, Flatten, BatchNormalization, GlobalAveragePooling2D
-from keras.models import load_model
+from keras.layers import Dense, Dropout, Flatten, BatchNormalization, Add, Input
+from keras.models import load_model, Model
 from keras.preprocessing.image import ImageDataGenerator, DirectoryIterator
-from keras.utils import set_random_seed
+from keras.src.callbacks import LearningRateScheduler, ReduceLROnPlateau
+from keras.src.initializers.initializers import HeNormal
+from keras.src.layers import Activation, AveragePooling2D, ZeroPadding2D, GlobalAveragePooling2D
+from keras.src.optimizers import SGD, Adam
+from keras.src.regularizers import l2
+from keras.utils import set_random_seed, plot_model
 
 set_random_seed(42)
 
-img_height, img_width = 64, 64
-batch_size = 128
+img_height, img_width, channels = 64, 64, 3
+batch_size = 64
+labels = 100
 train_path = "./data/train_images/"
 val_path = "./data/val_images/"
 test_path = "./data/test_images/"
@@ -87,11 +92,14 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
     train_generator = ImageDataGenerator(
         rescale=1. / 255,
         rotation_range=10,
-        width_shift_range=0.2,
-        height_shift_range=0.2,
-        zoom_range=0.2,
+        width_shift_range=0.15,
+        height_shift_range=0.15,
+        zoom_range=0.15,
+        brightness_range=[0.9, 1.1],
+        shear_range=0.05,
         horizontal_flip=True,
         vertical_flip=False,
+        channel_shift_range=10
     )
     val_generator = ImageDataGenerator(
         rescale=1. / 255,
@@ -102,6 +110,7 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
         target_size=(img_height, img_width),
         batch_size=batch_size,
         class_mode='categorical',
+        shuffle=True
     )
     batch = train_gen.next()
 
@@ -129,33 +138,63 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
     return train_gen, val_gen, test_generator
 
 
+def basic_block(input, filter, initializer, strides=1):
+    x_skip = input
+
+    x = Conv2D(filter, (3, 3), strides=strides, padding='same', kernel_initializer=initializer)(input)
+    x = BatchNormalization()(x)
+    x = Activation('relu')(x)
+
+    x = Conv2D(filter, (3, 3), padding='same', kernel_initializer=initializer)(x)
+    x = BatchNormalization()(x)
+
+    if strides != 1 or input.shape[3] != filter:
+        x_skip = Conv2D(filter, (1, 1), strides=strides, padding='same', kernel_initializer=initializer)(x_skip)
+        x_skip = BatchNormalization(axis=3)(x_skip)
+
+    x = Add()([x, x_skip])
+    x = Activation('relu')(x)
+    return x
+
+
+def residual_layers(x, filter, initializer):
+    layers = [3, 3, 3]  # ResNet20 layer configuration
+    for i in range(len(layers)):
+        for j in range(layers[i]):
+            if i > 0 and j == 0:
+                # First layer of the second and third group with stride 2
+                x = basic_block(x, filter, initializer, strides=2)
+            else:
+                x = basic_block(x, filter, initializer)
+        filter *= 2
+    return x
+
+
+def create_resnet(input_shape, labels, initializer):
+    inputs = Input(shape=input_shape)
+    x = Conv2D(16, (3, 3), strides=(1, 1), padding='same', kernel_initializer=initializer)(inputs)
+    x = BatchNormalization()(x)
+    x = Activation('relu')(x)
+
+    x = residual_layers(x, 16, initializer)  # Start with 16 filters
+
+    x = GlobalAveragePooling2D()(x)
+    x = Flatten()(x)
+    output = Dense(labels, activation='softmax')(x)
+    return Model(inputs, output)
+
+
 def create_model() -> None:
-    model = Sequential()
-    model.add(Conv2D(128, (3, 3), padding='same', input_shape=(img_height, img_width, 3), activation='relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Dropout(0.2))
+    model = create_resnet((img_width, img_height, channels), labels, HeNormal())
+    # Compile model
+    optimizer = Adam()
+    model.compile(optimizer=optimizer, loss="categorical_crossentropy", metrics=["accuracy"])
 
-    model.add(Conv2D(256, (3, 3), activation='relu', padding='same'))
-    model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2)))
-    model.add(Dropout(0.2))
-
-    model.add(Conv2D(512, (3, 3), activation='relu', padding='same'))
-    model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2)))
-    model.add(Dropout(0.2))
-
-    model.add(BatchNormalization())
-    model.add(GlobalAveragePooling2D())
-    model.add(Flatten())
-    model.add(Dense(128, activation="relu", kernel_initializer=VarianceScaling(),
-                    kernel_regularizer="l2", activity_regularizer="l2"))
-    model.add(Dropout(0.2)),
-    model.add(Dense(100, activation="softmax"))
-
+    # Model summary
     model.summary()
 
-    model.compile(optimizer='adam', loss="categorical_crossentropy", metrics=["accuracy"])
     logging.info(f"Model compiled {val_gen.class_indices}")
-
+    plot_model(model, to_file=f"models/{model_name}/model.png", show_shapes=True, show_layer_names=True)
     filepath = f"models/{model_name}/{model_name}.hdf5"
     checkpoint = ModelCheckpoint(
         filepath=filepath,
@@ -164,12 +203,12 @@ def create_model() -> None:
         verbose=1,
         save_best_only=True,
     )
-    early = EarlyStopping(patience=10, restore_best_weights="True", monitor="val_loss")
-    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=0.001)
+    early = EarlyStopping(monitor='val_loss', mode='min', patience=50, restore_best_weights=True, verbose=1)
+    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=15, min_lr=0.00001)
     callbacks = [checkpoint, early, reduce_lr]
     history = model.fit(
         train_gen,
-        epochs=100,
+        epochs=200,
         steps_per_epoch=len(train_gen),
         validation_data=val_gen,
         validation_steps=len(val_gen),
@@ -254,11 +293,10 @@ if __name__ == "__main__":
         exit(0)
     else:
 
-        model_name = "mod14_bis"
+        model_name = "cnn_advanced"
         os.makedirs(f"models/{model_name}", exist_ok=True)
         train_gen, val_gen, test_generator = preprocess()
         create_model()
         predict()
 
-# val_loss: 1.2103360891342163
-# val_acc: 0.722000002861023
+

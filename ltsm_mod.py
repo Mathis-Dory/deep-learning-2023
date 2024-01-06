@@ -134,12 +134,11 @@ def create_model() -> None:
     # Flatten the 2D image into a series of 1D sequences (rows)
     model.add(Reshape((img_height, img_width * 3), input_shape=(img_height, img_width, 3)))
 
-    # Add an LSTM layer - You can tune the number of units
+    # Add LSTM layers
     model.add(LSTM(units=64, return_sequences=True))
     model.add(Dropout(0.2))
     model.add(LSTM(units=128, return_sequences=True))
     model.add(Dropout(0.2))
-    # You can add more LSTM layers if needed
     model.add(LSTM(units=128, return_sequences=True))
     model.add(Dropout(0.2))
     model.add(LSTM(units=256, return_sequences=True))
@@ -149,11 +148,10 @@ def create_model() -> None:
     # Flatten the output to feed into a dense layer
     model.add(Flatten())
 
-    # Dense layers for classification
     model.add(Dense(256, activation="relu", kernel_initializer=VarianceScaling(),
                     kernel_regularizer="l2", activity_regularizer="l2"))
     model.add(Dropout(0.2))
-    model.add(Dense(100, activation="softmax"))  # Adjust the number of units to match the number of classes
+    model.add(Dense(100, activation="softmax"))
 
     model.summary()
 

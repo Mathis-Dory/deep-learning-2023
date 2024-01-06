@@ -116,7 +116,7 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
 
 def retrain_model() -> None:
     filepath = f'models/{model_name}/{model_name}.h5'
-    model = load_model('models/search_tuning/best_model_tuned.h5')
+    model = load_model('models/cnn_tuning/best_model_tuned.h5')
     model.summary()
     checkpoint = ModelCheckpoint(
         filepath=filepath,
