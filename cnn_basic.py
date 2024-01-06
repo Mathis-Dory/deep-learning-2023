@@ -13,6 +13,7 @@ from keras.layers import Conv2D, MaxPooling2D
 from keras.layers import Dense, Dropout, Flatten, BatchNormalization, GlobalAveragePooling2D, GlobalMaxPooling2D
 from keras.models import load_model
 from keras.preprocessing.image import ImageDataGenerator, DirectoryIterator
+from keras.src.optimizers import Adam
 from keras.utils import set_random_seed
 
 set_random_seed(42)
@@ -22,6 +23,10 @@ batch_size = 128
 train_path = "./data/train_images/"
 val_path = "./data/val_images/"
 test_path = "./data/test_images/"
+model_name = "cnn_basic"
+optimizer = Adam()
+
+
 df_train = pd.read_csv('./data/train.csv')
 df_val = pd.read_csv('./data/val.csv')
 
@@ -35,24 +40,23 @@ def init() -> None:
     logging.info(f"Labels distribution for training: {df_train['Class'].value_counts()}")
     logging.info(f"Labels distribution for validation: {df_val['Class'].value_counts()}")
 
-    # Plot 4 random images from training set with their
+    # Plot 4 random images from training set
     random_indices = df_train.sample(n=4).index
     plt.figure(figsize=(20, 15))
     for i, idx in enumerate(random_indices):
         image_name = df_train.loc[idx, 'Image']
         image_class = df_train.loc[idx, 'Class']
-
         image_path = os.path.join(train_path, image_name)
         image = Image.open(image_path)
 
         plt.subplot(2, 2, i + 1)
         plt.imshow(image)
-        plt.title(f"{image_name} | Class: {image_class}", pad=10, fontsize=10)  # Add padding to the title
+        plt.title(f"{image_name} | Class: {image_class}", pad=10, fontsize=12)
         plt.axis('off')
 
-    # Adjust subplot parameters
-    plt.subplots_adjust(hspace=0.3, wspace=0.9)  # Increase horizontal and vertical spacing
-
+    plt.subplots_adjust(hspace=0.3, wspace=0.9)
+    os.makedirs(f"models/{model_name}", exist_ok=True)
+    plt.savefig(f"models/{model_name}/random_images.png", format="png", dpi=300)
     plt.show()
 
 
@@ -155,7 +159,7 @@ def create_model() -> None:
 
     model.summary()
 
-    model.compile(optimizer='adam', loss="categorical_crossentropy", metrics=["accuracy"])
+    model.compile(optimizer=optimizer, loss="categorical_crossentropy", metrics=["accuracy"])
     logging.info(f"Model compiled {val_gen.class_indices}")
 
     filepath = f"models/{model_name}/{model_name}.hdf5"
@@ -180,8 +184,7 @@ def create_model() -> None:
         shuffle=True,
         callbacks=callbacks,
     )
-    val_loss, val_acc = \
-        model.evaluate(val_gen, steps=len(df_val))
+    val_loss, val_acc = model.evaluate(val_gen, steps=len(df_val))
 
     print('val_loss:', val_loss)
     print('val_acc:', val_acc)
@@ -191,22 +194,7 @@ def create_model() -> None:
     loss = history.history['loss']
     val_loss = history.history['val_loss']
 
-    epochs = range(1, len(acc) + 1)
 
-    plt.plot(epochs, loss, 'bo', label='Training loss')
-    plt.plot(epochs, val_loss, 'ro', label='Validation loss')
-    plt.title('Training and validation loss')
-    plt.legend()
-    plt.savefig(f"models/{model_name}/loss.png", format="png", dpi=1200)
-    plt.figure()
-
-    plt.plot(epochs, acc, 'bo', label='Training acc')
-    plt.plot(epochs, val_acc, 'ro', label='Validation acc')
-    plt.title('Training and validation accuracy')
-    plt.legend()
-    plt.savefig(f"models/{model_name}/accuracy.png", format="png", dpi=1200)
-    plt.figure()
-    plt.show()
 
 
 def prepare_test() -> None:
@@ -255,8 +243,6 @@ if __name__ == "__main__":
                          "script again.")
         exit(0)
     else:
-
-        model_name = "cnn_basic"
         os.makedirs(f"models/{model_name}", exist_ok=True)
         train_gen, val_gen, test_generator = preprocess()
         create_model()

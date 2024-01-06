@@ -1,32 +1,38 @@
 import logging
 import os
 import shutil
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PIL import Image
 from keras.callbacks import EarlyStopping, ModelCheckpoint
-from keras.initializers import VarianceScaling
-from keras.layers import Conv2D, MaxPooling2D
-from keras.layers import Dense, Dropout, Flatten, BatchNormalization, Add, Input
+from keras.layers import Conv2D
+from keras.layers import Dense, Flatten, BatchNormalization, Add, Input
 from keras.models import load_model, Model
 from keras.preprocessing.image import ImageDataGenerator, DirectoryIterator
-from keras.src.callbacks import LearningRateScheduler, ReduceLROnPlateau
+from keras.src.callbacks import ReduceLROnPlateau
 from keras.src.initializers.initializers import HeNormal
-from keras.src.layers import Activation, AveragePooling2D, ZeroPadding2D, GlobalAveragePooling2D
-from keras.src.optimizers import SGD, Adam
-from keras.src.regularizers import l2
+from keras.src.layers import Activation, GlobalAveragePooling2D
+from keras.src.optimizers import Adam
 from keras.utils import set_random_seed, plot_model
+from sklearn import metrics
+from sklearn.metrics import f1_score
 
 set_random_seed(42)
 
+# Set up global variables
 img_height, img_width, channels = 64, 64, 3
 batch_size = 64
 labels = 100
 train_path = "./data/train_images/"
 val_path = "./data/val_images/"
 test_path = "./data/test_images/"
+model_name = "resnet"
+optimizer = Adam()
+
+# Load datasets
 df_train = pd.read_csv('./data/train.csv')
 df_val = pd.read_csv('./data/val.csv')
 
@@ -40,24 +46,23 @@ def init() -> None:
     logging.info(f"Labels distribution for training: {df_train['Class'].value_counts()}")
     logging.info(f"Labels distribution for validation: {df_val['Class'].value_counts()}")
 
-    # Plot 4 random images from training set with their
+    # Plot 4 random images from training set
     random_indices = df_train.sample(n=4).index
     plt.figure(figsize=(20, 15))
     for i, idx in enumerate(random_indices):
         image_name = df_train.loc[idx, 'Image']
         image_class = df_train.loc[idx, 'Class']
-
         image_path = os.path.join(train_path, image_name)
         image = Image.open(image_path)
 
         plt.subplot(2, 2, i + 1)
         plt.imshow(image)
-        plt.title(f"{image_name} | Class: {image_class}", pad=10, fontsize=10)  # Add padding to the title
+        plt.title(f"{image_name} | Class: {image_class}", pad=10, fontsize=12)
         plt.axis('off')
 
-    # Adjust subplot parameters
-    plt.subplots_adjust(hspace=0.3, wspace=0.9)  # Increase horizontal and vertical spacing
-
+    plt.subplots_adjust(hspace=0.3, wspace=0.9)
+    os.makedirs(f"models/{model_name}", exist_ok=True)
+    plt.savefig(f"models/{model_name}/random_images.png", format="png", dpi=300)
     plt.show()
 
 
@@ -83,6 +88,18 @@ def structure_data(df: pd.DataFrame, dir_type: str) -> None:
         dest = os.path.join(class_dir, image_filename)
         shutil.copyfile(src, dest)
     logging.info(f"Finished structuring {dir_type} data")
+
+
+def prepare_test() -> None:
+    test_dir = 'test_dir'
+    os.makedirs(test_dir, exist_ok=True)
+    test_images = os.path.join(test_dir, 'test_images')
+    os.mkdir(test_images)
+    test_list = os.listdir('data/test_images')
+    for image in test_list:
+        src = os.path.join('data/test_images', image)
+        dst = os.path.join(test_images, image)
+        shutil.copyfile(src, dst)
 
 
 def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, float, float):
@@ -132,13 +149,13 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
         target_size=(img_height, img_width),
         batch_size=batch_size,
         class_mode=None,  # Set to None as we're only predicting, not training
-        shuffle=False  # Ensure that the order of predictions matches file order
+        shuffle=False  # Ensure that the order of predictions matches files order
     )
 
     return train_gen, val_gen, test_generator
 
 
-def basic_block(input, filter, initializer, strides=1):
+def basic_block(input, filter, initializer, strides=1) -> Any:
     x_skip = input
 
     x = Conv2D(filter, (3, 3), strides=strides, padding='same', kernel_initializer=initializer)(input)
@@ -157,8 +174,8 @@ def basic_block(input, filter, initializer, strides=1):
     return x
 
 
-def residual_layers(x, filter, initializer):
-    layers = [3, 3, 3]  # ResNet20 layer configuration
+def residual_layers(x, filter, initializer) -> Any:
+    layers = [3, 3, 3]
     for i in range(len(layers)):
         for j in range(layers[i]):
             if i > 0 and j == 0:
@@ -170,30 +187,30 @@ def residual_layers(x, filter, initializer):
     return x
 
 
-def create_resnet(input_shape, labels, initializer):
+def create_resnet(input_shape, labels, initializer) -> Model:
     inputs = Input(shape=input_shape)
     x = Conv2D(16, (3, 3), strides=(1, 1), padding='same', kernel_initializer=initializer)(inputs)
     x = BatchNormalization()(x)
     x = Activation('relu')(x)
 
-    x = residual_layers(x, 16, initializer)  # Start with 16 filters
+    x = residual_layers(x, 16, initializer)
 
     x = GlobalAveragePooling2D()(x)
     x = Flatten()(x)
     output = Dense(labels, activation='softmax')(x)
+
     return Model(inputs, output)
 
 
 def create_model() -> None:
     model = create_resnet((img_width, img_height, channels), labels, HeNormal())
     # Compile model
-    optimizer = Adam()
     model.compile(optimizer=optimizer, loss="categorical_crossentropy", metrics=["accuracy"])
 
     # Model summary
     model.summary()
 
-    logging.info(f"Model compiled {val_gen.class_indices}")
+    # Save model summary to file
     plot_model(model, to_file=f"models/{model_name}/model.png", show_shapes=True, show_layer_names=True)
     filepath = f"models/{model_name}/{model_name}.hdf5"
     checkpoint = ModelCheckpoint(
@@ -217,45 +234,65 @@ def create_model() -> None:
         shuffle=True,
         callbacks=callbacks,
     )
-    val_loss, val_acc = \
-        model.evaluate(val_gen, steps=len(df_val))
-
+    val_loss, val_acc = model.evaluate(val_gen, steps=len(df_val))
     print('val_loss:', val_loss)
     print('val_acc:', val_acc)
+    y_pred = model.predict(val_gen, len(val_gen))
+    y_pred = np.argmax(y_pred, axis=1)
+    f1 = f1_score(val_gen.classes, y_pred, average='weighted')
+    print('F1 Score: {:.2f}'.format(f1))
 
-    acc = history.history['accuracy']
-    val_acc = history.history['val_accuracy']
-    loss = history.history['loss']
-    val_loss = history.history['val_loss']
+    # Plot training history
+    plot_training_history(history)
 
-    epochs = range(1, len(acc) + 1)
+    # Confusion matrix and F1 score
+    plot_confusion_matrix(model)
 
-    plt.plot(epochs, loss, 'bo', label='Training loss')
-    plt.plot(epochs, val_loss, 'ro', label='Validation loss')
-    plt.title('Training and validation loss')
-    plt.legend()
-    plt.savefig(f"models/{model_name}/loss.png", format="png", dpi=1200)
+
+def plot_training_history(history):
+    plt.plot(history.history["accuracy"], color="red")
+    plt.plot(history.history["val_accuracy"], color="purple")
+    plt.title("model accuracy")
+    plt.ylabel("accuracy")
+    plt.xlabel("epoch")
+    plt.legend(["train", "test"], loc="upper left")
+    plt.savefig(f"models/{model_name}/accuracy.png", format="png", dpi=300)
     plt.figure()
+    plt.show()
 
-    plt.plot(epochs, acc, 'bo', label='Training acc')
-    plt.plot(epochs, val_acc, 'ro', label='Validation acc')
-    plt.title('Training and validation accuracy')
-    plt.legend()
-    plt.savefig(f"models/{model_name}/accuracy.png", format="png", dpi=1200)
+    plt.plot(history.history["loss"], color="green")
+    plt.plot(history.history["val_loss"], color="blue")
+    plt.title("model loss")
+    plt.ylabel("loss")
+    plt.xlabel("epoch")
+    plt.legend(["train", "test"], loc="upper left")
+    plt.savefig(f"models/{model_name}/loss.png", format="png", dpi=300)
     plt.figure()
     plt.show()
 
 
-def prepare_test() -> None:
-    test_dir = 'test_dir'
-    os.makedirs(test_dir, exist_ok=True)
-    test_images = os.path.join(test_dir, 'test_images')
-    os.mkdir(test_images)
-    test_list = os.listdir('data/test_images')
-    for image in test_list:
-        src = os.path.join('data/test_images', image)
-        dst = os.path.join(test_images, image)
-        shutil.copyfile(src, dst)
+def plot_confusion_matrix(val_gen):
+    best_model = load_model(f"models/{model_name}/{model_name}.hdf5")
+
+    # Extract data and labels from val_gen
+    x_test_matrix, y_test_matrix = next(val_gen)
+
+    f, ax = plt.subplots(1, 1, figsize=(30, 30))
+    test_predictions = best_model.predict(x_test_matrix)
+    metrics.ConfusionMatrixDisplay.from_predictions(
+        np.argmax(y_test_matrix, axis=1),
+        np.argmax(test_predictions, axis=1),
+        ax=ax,
+        normalize=None,
+    )
+    plt.title("Confusion matrix")
+    plt.ylabel("True label")
+    plt.xlabel("Predicted label")
+    tick_marks = np.arange(labels)  # Assuming 'labels' is the number of classes
+    plt.xticks(tick_marks, range(1, labels + 1))
+    plt.yticks(tick_marks, range(1, labels + 1))
+    plt.savefig(f"./models/{model_name}/confusion_matrix.png", dpi=300, format="png")
+    plt.show()
 
 
 def predict() -> None:
@@ -276,7 +313,7 @@ def predict() -> None:
     data = {'Image': image_names, 'Class': predicted_classes_list}
     df_preds = pd.DataFrame(data)
 
-    # Save DataFrame to CSV
+    # Save predictions to CSV
 
     df_preds.to_csv(f"models/{model_name}/submission-{model_name}.csv", index=False, columns=['Image', 'Class'])
 
@@ -284,19 +321,14 @@ def predict() -> None:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     init()
-    # structure_data(df_train, 'train_images')
-    # structure_data(df_val, 'val_images')
-    # prepare_test()
+    # structure_data(df_train, 'train_images')  # Run only once for the whole project
+    # structure_data(df_val, 'val_images')  # Run only once for the whole project
+    # prepare_test()  # Run only once for the whole project
     if not os.path.exists("working_dir/train_images") or not os.path.exists("working_dir/val_images"):
         logging.critical("working_dir or test_dir do not exist. Please run structure_data() first, then run this "
                          "script again.")
         exit(0)
     else:
-
-        model_name = "cnn_advanced"
-        os.makedirs(f"models/{model_name}", exist_ok=True)
         train_gen, val_gen, test_generator = preprocess()
         create_model()
         predict()
-
-
