@@ -18,7 +18,7 @@ from keras.src.layers import Activation, GlobalAveragePooling2D
 from keras.src.optimizers import Adam
 from keras.utils import set_random_seed, plot_model
 from sklearn import metrics
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, confusion_matrix, ConfusionMatrixDisplay
 
 set_random_seed(42)
 
@@ -234,19 +234,11 @@ def create_model() -> None:
         shuffle=True,
         callbacks=callbacks,
     )
-    val_loss, val_acc = model.evaluate(val_gen, steps=len(df_val))
-    print('val_loss:', val_loss)
-    print('val_acc:', val_acc)
-    y_pred = model.predict(val_gen, len(val_gen))
-    y_pred = np.argmax(y_pred, axis=1)
-    f1 = f1_score(val_gen.classes, y_pred, average='weighted')
-    print('F1 Score: {:.2f}'.format(f1))
-
     # Plot training history
     plot_training_history(history)
 
     # Confusion matrix and F1 score
-    plot_confusion_matrix(model)
+    plot_confusion_matrix_and_score(model)
 
 
 def plot_training_history(history):
@@ -271,28 +263,35 @@ def plot_training_history(history):
     plt.show()
 
 
-def plot_confusion_matrix(val_gen):
+def plot_confusion_matrix_and_score(val_gen):
     best_model = load_model(f"models/{model_name}/{model_name}.hdf5")
 
-    # Extract data and labels from val_gen
-    x_test_matrix, y_test_matrix = next(val_gen)
+    y_true = np.concatenate([val_gen.next()[1] for _ in range(len(val_gen))])
+    y_pred = best_model.predict(val_gen, steps=len(val_gen))
+    y_pred_classes = np.argmax(y_pred, axis=1)
+    y_true_classes = np.argmax(y_true, axis=1)
 
-    f, ax = plt.subplots(1, 1, figsize=(30, 30))
-    test_predictions = best_model.predict(x_test_matrix)
-    metrics.ConfusionMatrixDisplay.from_predictions(
-        np.argmax(y_test_matrix, axis=1),
-        np.argmax(test_predictions, axis=1),
-        ax=ax,
-        normalize=None,
-    )
-    plt.title("Confusion matrix")
-    plt.ylabel("True label")
-    plt.xlabel("Predicted label")
-    tick_marks = np.arange(labels)  # Assuming 'labels' is the number of classes
-    plt.xticks(tick_marks, range(1, labels + 1))
-    plt.yticks(tick_marks, range(1, labels + 1))
-    plt.savefig(f"./models/{model_name}/confusion_matrix.png", dpi=300, format="png")
+    # Calculate the confusion matrix
+    cm = confusion_matrix(y_true_classes, y_pred_classes, normalize='true')
+
+    # Plotting a normalized confusion matrix with improved label visibility
+    fig, ax = plt.subplots(figsize=(64, 64))
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=np.arange(len(val_gen.class_indices)))
+    disp.plot(include_values=False, cmap='viridis', ax=ax, xticks_rotation='vertical')
+    ax.set_title('Normalized Confusion Matrix')
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.savefig(f"models/{model_name}/normalized_confusion_matrix_improved.png", dpi=300)
     plt.show()
+
+    # Evaluate the model to get validation loss and accuracy
+    val_loss, val_acc = best_model.evaluate(val_gen, steps=len(df_val))
+    print('Validation Loss:', val_loss)
+    print('Validation Accuracy:', val_acc)
+
+    # Calculate the F1 score
+    f1 = f1_score(y_true_classes, y_pred_classes, average='weighted')
+    print(f'F1 Score: {f1}')
 
 
 def predict() -> None:
@@ -318,6 +317,7 @@ def predict() -> None:
     df_preds.to_csv(f"models/{model_name}/submission-{model_name}.csv", index=False, columns=['Image', 'Class'])
 
 
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     init()
@@ -330,5 +330,6 @@ if __name__ == "__main__":
         exit(0)
     else:
         train_gen, val_gen, test_generator = preprocess()
-        create_model()
-        predict()
+        #create_model()
+        #predict()
+        plot_confusion_matrix_and_score(val_gen)
