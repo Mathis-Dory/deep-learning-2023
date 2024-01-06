@@ -238,7 +238,7 @@ def create_model() -> None:
     plot_training_history(history)
 
     # Confusion matrix and F1 score
-    plot_confusion_matrix_and_score(model)
+    plot_confusion_matrix_and_score()
 
 
 def plot_training_history(history):
@@ -263,7 +263,7 @@ def plot_training_history(history):
     plt.show()
 
 
-def plot_confusion_matrix_and_score(val_gen):
+def plot_confusion_matrix_and_score():
     best_model = load_model(f"models/{model_name}/{model_name}.hdf5")
 
     y_true = np.concatenate([val_gen.next()[1] for _ in range(len(val_gen))])
@@ -330,6 +330,5 @@ if __name__ == "__main__":
         exit(0)
     else:
         train_gen, val_gen, test_generator = preprocess()
-        #create_model()
-        #predict()
-        plot_confusion_matrix_and_score(val_gen)
+        create_model()
+        predict()

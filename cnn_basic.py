@@ -15,6 +15,7 @@ from keras.models import load_model
 from keras.preprocessing.image import ImageDataGenerator, DirectoryIterator
 from keras.src.optimizers import Adam
 from keras.utils import set_random_seed
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, f1_score
 
 set_random_seed(42)
 
@@ -184,17 +185,64 @@ def create_model() -> None:
         shuffle=True,
         callbacks=callbacks,
     )
-    val_loss, val_acc = model.evaluate(val_gen, steps=len(df_val))
+    # Plot training history
+    plot_training_history(history)
 
-    print('val_loss:', val_loss)
-    print('val_acc:', val_acc)
-
-    acc = history.history['accuracy']
-    val_acc = history.history['val_accuracy']
-    loss = history.history['loss']
-    val_loss = history.history['val_loss']
+    # Confusion matrix and F1 score
+    plot_confusion_matrix_and_score()
 
 
+def plot_training_history(history):
+    plt.plot(history.history["accuracy"], color="red")
+    plt.plot(history.history["val_accuracy"], color="purple")
+    plt.title("model accuracy")
+    plt.ylabel("accuracy")
+    plt.xlabel("epoch")
+    plt.legend(["train", "test"], loc="upper left")
+    plt.savefig(f"models/{model_name}/accuracy.png", format="png", dpi=300)
+    plt.figure()
+    plt.show()
+
+    plt.plot(history.history["loss"], color="green")
+    plt.plot(history.history["val_loss"], color="blue")
+    plt.title("model loss")
+    plt.ylabel("loss")
+    plt.xlabel("epoch")
+    plt.legend(["train", "test"], loc="upper left")
+    plt.savefig(f"models/{model_name}/loss.png", format="png", dpi=300)
+    plt.figure()
+    plt.show()
+
+
+def plot_confusion_matrix_and_score():
+    best_model = load_model(f"models/{model_name}/{model_name}.hdf5")
+
+    y_true = np.concatenate([val_gen.next()[1] for _ in range(len(val_gen))])
+    y_pred = best_model.predict(val_gen, steps=len(val_gen))
+    y_pred_classes = np.argmax(y_pred, axis=1)
+    y_true_classes = np.argmax(y_true, axis=1)
+
+    # Calculate the confusion matrix
+    cm = confusion_matrix(y_true_classes, y_pred_classes, normalize='true')
+
+    # Plotting a normalized confusion matrix with improved label visibility
+    fig, ax = plt.subplots(figsize=(64, 64))
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=np.arange(len(val_gen.class_indices)))
+    disp.plot(include_values=False, cmap='viridis', ax=ax, xticks_rotation='vertical')
+    ax.set_title('Normalized Confusion Matrix')
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.savefig(f"models/{model_name}/normalized_confusion_matrix_improved.png", dpi=300)
+    plt.show()
+
+    # Evaluate the model to get validation loss and accuracy
+    val_loss, val_acc = best_model.evaluate(val_gen, steps=len(df_val))
+    print('Validation Loss:', val_loss)
+    print('Validation Accuracy:', val_acc)
+
+    # Calculate the F1 score
+    f1 = f1_score(y_true_classes, y_pred_classes, average='weighted')
+    print(f'F1 Score: {f1}')
 
 
 def prepare_test() -> None:
@@ -243,9 +291,6 @@ if __name__ == "__main__":
                          "script again.")
         exit(0)
     else:
-        os.makedirs(f"models/{model_name}", exist_ok=True)
         train_gen, val_gen, test_generator = preprocess()
         create_model()
         predict()
-
-
