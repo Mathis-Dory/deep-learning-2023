@@ -154,7 +154,8 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
     return train_gen, val_gen, test_generator
 
 
-def basic_block(input, filter, initializer, strides=1) -> Any:
+def block(input, filter, initializer, strides=1) -> Any:
+    # Save the input value for a skip connection
     x_skip = input
 
     x = Conv2D(filter, (3, 3), strides=strides, padding='same', kernel_initializer=initializer)(input)
@@ -164,6 +165,9 @@ def basic_block(input, filter, initializer, strides=1) -> Any:
     x = Conv2D(filter, (3, 3), padding='same', kernel_initializer=initializer)(x)
     x = BatchNormalization()(x)
 
+    # If the stride is not 1 or the number of filters in the input doesn't match the number of filters in the
+    # convolutional layers, we will have a shape issue when adding the input to the output because the shapes won't
+    # match. To solve this, we apply a 1x1 convolution to the input to change the number of filters.
     if strides != 1 or input.shape[3] != filter:
         x_skip = Conv2D(filter, (1, 1), strides=strides, padding='same', kernel_initializer=initializer)(x_skip)
         x_skip = BatchNormalization(axis=3)(x_skip)
@@ -174,28 +178,40 @@ def basic_block(input, filter, initializer, strides=1) -> Any:
 
 
 def residual_layers(x, filter, initializer) -> Any:
+    # We create the different groups of residual layers
+    # 3 groups of residual layers with 3 blocks in each group
     layers = [3, 3, 3]
     for i in range(len(layers)):
         for j in range(layers[i]):
             if i > 0 and j == 0:
-                # First layer of the second and third group with stride 2
-                x = basic_block(x, filter, initializer, strides=2)
+                # First layer of the second and third group with stride 2 (need to the skip connection to have the
+                # same shape)
+                x = block(x, filter, initializer, strides=2)
             else:
-                x = basic_block(x, filter, initializer)
+                x = block(x, filter, initializer)
+        # Double the number of filters for each group
         filter *= 2
     return x
 
 
 def create_resnet(input_shape, labels, initializer) -> Model:
     inputs = Input(shape=input_shape)
+    # Initial conv layer, the stride is 1 (conv filter movement is 1 pixel) and padding is same to ensure that the
+    # output shape matches the input shape
     x = Conv2D(16, (3, 3), strides=(1, 1), padding='same', kernel_initializer=initializer)(inputs)
+    # Batch normalization is applied to normalize the inputs of each layer to improve training speed and stability
+    # Batch normalization normalizes the activations of the previous layer for each given neuron, across the batch.
     x = BatchNormalization()(x)
     x = Activation('relu')(x)
 
+    # Residual layers are used to increase the depth of the network
     x = residual_layers(x, 16, initializer)
 
+    # Reduce each feature map to a single number by taking the average of the numbers in that feature map.
     x = GlobalAveragePooling2D()(x)
+    # Flatten the pooled feature map to a single vector
     x = Flatten()(x)
+    # Final dense layer with softmax activation. It converts the output to probability scores for each class.
     output = Dense(labels, activation='softmax')(x)
 
     return Model(inputs, output)
@@ -220,6 +236,8 @@ def create_model() -> None:
         save_best_only=True,
     )
     early = EarlyStopping(monitor='val_loss', mode='min', patience=50, restore_best_weights=True, verbose=1)
+    # Reduce the learning rate when the validation loss stops improving.
+    # Decreasing the learning rate helps the model to fine-tune and find minima.
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=15, min_lr=0.00001)
     callbacks = [checkpoint, early, reduce_lr]
     history = model.fit(
