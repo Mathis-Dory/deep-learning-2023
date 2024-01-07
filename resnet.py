@@ -334,7 +334,6 @@ def predict() -> None:
     df_preds.to_csv(f"models/{model_name}/submission-{model_name}.csv", index=False, columns=['Image', 'Class'])
 
 
-
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     init()
