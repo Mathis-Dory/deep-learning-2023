@@ -17,7 +17,6 @@ from keras.src.initializers.initializers import HeNormal
 from keras.src.layers import Activation, GlobalAveragePooling2D
 from keras.src.optimizers import Adam
 from keras.utils import set_random_seed, plot_model
-from sklearn import metrics
 from sklearn.metrics import f1_score, confusion_matrix, ConfusionMatrixDisplay
 
 set_random_seed(42)

@@ -12,16 +12,23 @@ from keras.initializers import VarianceScaling
 from keras.layers import Dense, Dropout, Flatten, Reshape, LSTM
 from keras.models import load_model
 from keras.preprocessing.image import ImageDataGenerator, DirectoryIterator
+from keras.src.optimizers import Adam
+from keras.src.utils import plot_model
 from keras.utils import set_random_seed
+from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix, f1_score
 
 current_dir = os.path.dirname(__file__)
 set_random_seed(42)
 
-img_height, img_width = 64, 64
+img_height, img_width, channels = 64, 64, 3
 batch_size = 128
+labels = 100
 train_path = "./data/train_images/"
 val_path = "./data/val_images/"
 test_path = "./data/test_images/"
+model_name = "lstm"
+optimizer = Adam()
+
 df_train = pd.read_csv('./data/train.csv')
 df_val = pd.read_csv('./data/val.csv')
 
@@ -35,22 +42,23 @@ def init() -> None:
     logging.info(f"Labels distribution for training: {df_train['Class'].value_counts()}")
     logging.info(f"Labels distribution for validation: {df_val['Class'].value_counts()}")
 
-    # Plot 4 random images from training set with their
+    # Plot 4 random images from training set
     random_indices = df_train.sample(n=4).index
-    plt.figure(figsize=(12, 10))
+    plt.figure(figsize=(20, 15))
     for i, idx in enumerate(random_indices):
         image_name = df_train.loc[idx, 'Image']
         image_class = df_train.loc[idx, 'Class']
-
         image_path = os.path.join(train_path, image_name)
         image = Image.open(image_path)
 
         plt.subplot(2, 2, i + 1)
         plt.imshow(image)
-        plt.title(f"{image_name} | Class: {image_class}")
+        plt.title(f"{image_name} | Class: {image_class}", pad=10, fontsize=12)
         plt.axis('off')
 
-    plt.tight_layout(pad=3.0)
+    plt.subplots_adjust(hspace=0.3, wspace=0.9)
+    os.makedirs(f"models/{model_name}", exist_ok=True)
+    plt.savefig(f"models/{model_name}/random_images.png", format="png", dpi=300)
     plt.show()
 
 
@@ -78,18 +86,33 @@ def structure_data(df: pd.DataFrame, dir_type: str) -> None:
     logging.info(f"Finished structuring {dir_type} data")
 
 
+def prepare_test() -> None:
+    test_dir = 'test_dir'
+    os.makedirs(test_dir, exist_ok=True)
+    test_images = os.path.join(test_dir, 'test_images')
+    os.mkdir(test_images)
+    test_list = os.listdir('data/test_images')
+    for image in test_list:
+        src = os.path.join('data/test_images', image)
+        dst = os.path.join(test_images, image)
+        shutil.copyfile(src, dst)
+
+
 def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, float, float):
-    working_train = os.path.join(current_dir, 'working_dir', 'data', 'train_images')
-    working_val = os.path.join(current_dir, 'working_dir', 'data','val_images')
-    test_dir = os.path.join(current_dir, 'test_dir')
+    working_train = 'working_dir/train_images'
+    working_val = 'working_dir/val_images'
+    test_dir = 'test_dir'
     train_generator = ImageDataGenerator(
         rescale=1. / 255,
         rotation_range=10,
-        width_shift_range=0.05,
-        height_shift_range=0.05,
-        zoom_range=0.2,
-        horizontal_flip=False,
-        fill_mode='nearest'
+        width_shift_range=0.15,
+        height_shift_range=0.15,
+        zoom_range=0.15,
+        brightness_range=[0.9, 1.1],
+        shear_range=0.05,
+        horizontal_flip=True,
+        vertical_flip=False,
+        channel_shift_range=10
     )
     val_generator = ImageDataGenerator(
         rescale=1. / 255,
@@ -147,7 +170,6 @@ def create_model() -> None:
     model.add(Dropout(0.2))
     # Flatten the output to feed into a dense layer
     model.add(Flatten())
-
     model.add(Dense(256, activation="relu", kernel_initializer=VarianceScaling(),
                     kernel_regularizer="l2", activity_regularizer="l2"))
     model.add(Dropout(0.2))
@@ -161,8 +183,8 @@ def create_model() -> None:
     model.summary()
 
     model.compile(optimizer='adam', loss="categorical_crossentropy", metrics=["accuracy"])
-    logging.info(f"Model compiled {val_gen.class_indices}")
 
+    plot_model(model, to_file=f"models/{model_name}/model.png", show_shapes=True, show_layer_names=True)
     filepath = f"models/{model_name}/{model_name}.hdf5"
     checkpoint = ModelCheckpoint(
         filepath=filepath,
@@ -171,7 +193,7 @@ def create_model() -> None:
         verbose=1,
         save_best_only=True,
     )
-    early = EarlyStopping(patience=6, restore_best_weights="True", monitor="val_loss")
+    early = EarlyStopping(patience=10, restore_best_weights="True", monitor="val_loss")
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=0.001)
     callbacks = [checkpoint, early, reduce_lr]
     history = model.fit(
@@ -185,45 +207,64 @@ def create_model() -> None:
         shuffle=True,
         callbacks=callbacks,
     )
-    val_loss, val_acc = \
-        model.evaluate(val_gen, steps=len(df_val))
+    # Plot training history
+    plot_training_history(history)
 
-    print('val_loss:', val_loss)
-    print('val_acc:', val_acc)
+    # Confusion matrix and F1 score
+    plot_confusion_matrix_and_score()
 
-    acc = history.history['accuracy']
-    val_acc = history.history['val_accuracy']
-    loss = history.history['loss']
-    val_loss = history.history['val_loss']
 
-    epochs = range(1, len(acc) + 1)
-
-    plt.plot(epochs, loss, 'bo', label='Training loss')
-    plt.plot(epochs, val_loss, 'b', label='Validation loss')
-    plt.title('Training and validation loss')
-    plt.legend()
-    plt.savefig(f"models/{model_name}/loss.png", format="png", dpi=1200)
+def plot_training_history(history):
+    plt.plot(history.history["accuracy"], color="red")
+    plt.plot(history.history["val_accuracy"], color="purple")
+    plt.title("model accuracy")
+    plt.ylabel("accuracy")
+    plt.xlabel("epoch")
+    plt.legend(["train", "test"], loc="upper left")
+    plt.savefig(f"models/{model_name}/accuracy.png", format="png", dpi=300)
     plt.figure()
+    plt.show()
 
-    plt.plot(epochs, acc, 'bo', label='Training acc')
-    plt.plot(epochs, val_acc, 'b', label='Validation acc')
-    plt.title('Training and validation accuracy')
-    plt.legend()
-    plt.savefig(f"models/{model_name}/accuracy.png", format="png", dpi=1200)
+    plt.plot(history.history["loss"], color="green")
+    plt.plot(history.history["val_loss"], color="blue")
+    plt.title("model loss")
+    plt.ylabel("loss")
+    plt.xlabel("epoch")
+    plt.legend(["train", "test"], loc="upper left")
+    plt.savefig(f"models/{model_name}/loss.png", format="png", dpi=300)
     plt.figure()
     plt.show()
 
 
-def prepare_test() -> None:
-    test_dir = 'test_dir'
-    os.makedirs(test_dir, exist_ok=True)
-    test_images = os.path.join(test_dir, 'test_images')
-    os.mkdir(test_images)
-    test_list = os.listdir('data/test_images')
-    for image in test_list:
-        src = os.path.join('data/test_images', image)
-        dst = os.path.join(test_images, image)
-        shutil.copyfile(src, dst)
+def plot_confusion_matrix_and_score():
+    best_model = load_model(f"models/{model_name}/{model_name}.hdf5")
+
+    y_true = np.concatenate([val_gen.next()[1] for _ in range(len(val_gen))])
+    y_pred = best_model.predict(val_gen, steps=len(val_gen))
+    y_pred_classes = np.argmax(y_pred, axis=1)
+    y_true_classes = np.argmax(y_true, axis=1)
+
+    # Calculate the confusion matrix
+    cm = confusion_matrix(y_true_classes, y_pred_classes, normalize='true')
+
+    # Plotting a normalized confusion matrix with improved label visibility
+    fig, ax = plt.subplots(figsize=(64, 64))
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=np.arange(len(val_gen.class_indices)))
+    disp.plot(include_values=False, cmap='viridis', ax=ax, xticks_rotation='vertical')
+    ax.set_title('Normalized Confusion Matrix')
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.savefig(f"models/{model_name}/normalized_confusion_matrix_improved.png", dpi=300)
+    plt.show()
+
+    # Evaluate the model to get validation loss and accuracy
+    val_loss, val_acc = best_model.evaluate(val_gen, steps=len(df_val))
+    print('Validation Loss:', val_loss)
+    print('Validation Accuracy:', val_acc)
+
+    # Calculate the F1 score
+    f1 = f1_score(y_true_classes, y_pred_classes, average='weighted')
+    print(f'F1 Score: {f1}')
 
 
 def predict() -> None:
@@ -260,9 +301,6 @@ if __name__ == "__main__":
                          "script again.")
         exit(0)
     else:
-
-        model_name = "lstm1"
-        os.makedirs(f"models/{model_name}", exist_ok=True)
         train_gen, val_gen, test_generator = preprocess()
         create_model()
         predict()
