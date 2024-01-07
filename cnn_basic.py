@@ -57,7 +57,7 @@ def init() -> None:
 
     plt.subplots_adjust(hspace=0.3, wspace=0.9)
     os.makedirs(f"models/{model_name}", exist_ok=True)
-    plt.savefig(f"models/{model_name}/random_images.png", format="png", dpi=300)
+    plt.savefig(f"models/{model_name}/random_images.png", format="png", dpi=96)
     plt.show()
 
 
@@ -199,7 +199,7 @@ def plot_training_history(history):
     plt.ylabel("accuracy")
     plt.xlabel("epoch")
     plt.legend(["train", "test"], loc="upper left")
-    plt.savefig(f"models/{model_name}/accuracy.png", format="png", dpi=300)
+    plt.savefig(f"models/{model_name}/accuracy.png", format="png", dpi=96)
     plt.figure()
     plt.show()
 
@@ -209,7 +209,7 @@ def plot_training_history(history):
     plt.ylabel("loss")
     plt.xlabel("epoch")
     plt.legend(["train", "test"], loc="upper left")
-    plt.savefig(f"models/{model_name}/loss.png", format="png", dpi=300)
+    plt.savefig(f"models/{model_name}/loss.png", format="png", dpi=96)
     plt.figure()
     plt.show()
 
@@ -232,7 +232,7 @@ def plot_confusion_matrix_and_score():
     ax.set_title('Normalized Confusion Matrix')
     plt.xticks(fontsize=14)
     plt.yticks(fontsize=14)
-    plt.savefig(f"models/{model_name}/normalized_confusion_matrix_improved.png", dpi=300)
+    plt.savefig(f"models/{model_name}/normalized_confusion_matrix_improved.png", dpi=96)
     plt.show()
 
     # Evaluate the model to get validation loss and accuracy
