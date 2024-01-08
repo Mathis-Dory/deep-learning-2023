@@ -201,7 +201,7 @@ def plot_confusion_matrix_and_score():
 
 
 def predict() -> None:
-    model = load_model(f"models/{model_name}/{model_name}.h5")
+    model = load_model(f"models/{model_name}/{model_name}.hdf5")
     predictions = model.predict(test_generator, steps=len(test_generator), verbose=1)
     predicted_classes = np.argmax(predictions, axis=1)
     class_labels = list(train_gen.class_indices.keys())
