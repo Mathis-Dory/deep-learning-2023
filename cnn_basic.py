@@ -10,7 +10,7 @@ from keras import Sequential
 from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from keras.initializers import VarianceScaling
 from keras.layers import Conv2D, MaxPooling2D
-from keras.layers import Dense, Dropout, Flatten, BatchNormalization, GlobalAveragePooling2D, GlobalMaxPooling2D
+from keras.layers import Dense, Dropout, Flatten, BatchNormalization, GlobalAveragePooling2D
 from keras.models import load_model
 from keras.preprocessing.image import ImageDataGenerator, DirectoryIterator
 from keras.src.optimizers import Adam

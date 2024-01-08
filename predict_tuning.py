@@ -5,13 +5,12 @@ import shutil
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from PIL import Image
 from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from keras.models import load_model
 from keras.preprocessing.image import ImageDataGenerator, DirectoryIterator
 from keras.utils import set_random_seed
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, f1_score
 
 current_dir = os.path.dirname(__file__)
 set_random_seed(42)
@@ -21,6 +20,8 @@ batch_size = 128
 train_path = "./data/train_images/"
 val_path = "./data/val_images/"
 test_path = "./data/test_images/"
+model_name = "mod_tuned"
+
 df_train = pd.read_csv('./data/train.csv')
 df_val = pd.read_csv('./data/val.csv')
 
@@ -34,25 +35,25 @@ def init() -> None:
     logging.info(f"Labels distribution for training: {df_train['Class'].value_counts()}")
     logging.info(f"Labels distribution for validation: {df_val['Class'].value_counts()}")
 
-    # Plot 4 random images from training set with their
+    # Plot 4 random images from training set
     random_indices = df_train.sample(n=4).index
     plt.figure(figsize=(20, 15))
     for i, idx in enumerate(random_indices):
         image_name = df_train.loc[idx, 'Image']
         image_class = df_train.loc[idx, 'Class']
-
         image_path = os.path.join(train_path, image_name)
         image = Image.open(image_path)
 
         plt.subplot(2, 2, i + 1)
         plt.imshow(image)
-        plt.title(f"{image_name} | Class: {image_class}", pad=10, fontsize=10)  # Add padding to the title
+        plt.title(f"{image_name} | Class: {image_class}", pad=10, fontsize=12)
         plt.axis('off')
 
-    # Adjust subplot parameters
-    plt.subplots_adjust(hspace=0.3, wspace=0.9)  # Increase horizontal and vertical spacing
-
+    plt.subplots_adjust(hspace=0.3, wspace=0.9)
+    os.makedirs(f"models/{model_name}", exist_ok=True)
+    plt.savefig(f"models/{model_name}/random_images.png", format="png", dpi=96)
     plt.show()
+
 
 def structure_data(df: pd.DataFrame, dir_type: str) -> None:
     working_dir = 'working_dir'
@@ -70,7 +71,7 @@ def structure_data(df: pd.DataFrame, dir_type: str) -> None:
 
 def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, float, float):
     working_train = os.path.join(current_dir, 'working_dir', 'train_images')
-    working_val = os.path.join(current_dir, 'working_dir','val_images')
+    working_val = os.path.join(current_dir, 'working_dir', 'val_images')
     test_dir = os.path.join(current_dir, 'test_dir')
     train_generator = ImageDataGenerator(
         rescale=1. / 255,
@@ -115,7 +116,7 @@ def preprocess() -> (DirectoryIterator, DirectoryIterator, DirectoryIterator, fl
 
 
 def retrain_model() -> None:
-    filepath = f'models/{model_name}/{model_name}.h5'
+    filepath = f'models/{model_name}/{model_name}.hdf5'
     model = load_model('models/cnn_tuning/best_model_tuned.h5')
     model.summary()
     checkpoint = ModelCheckpoint(
@@ -125,7 +126,7 @@ def retrain_model() -> None:
         verbose=1,
         save_best_only=True,
     )
-    early = EarlyStopping(patience=6, restore_best_weights="True", monitor="val_loss")
+    early = EarlyStopping(patience=10, restore_best_weights="True", monitor="val_loss")
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=0.001)
     callbacks = [checkpoint, early, reduce_lr]
     history = model.fit(
@@ -139,59 +140,64 @@ def retrain_model() -> None:
         shuffle=True,
         callbacks=callbacks,
     )
-    val_loss, val_acc = \
-        model.evaluate(val_gen, steps=len(df_val))
+    # Plot training history
+    plot_training_history(history)
 
-    print('val_loss:', val_loss)
-    print('val_acc:', val_acc)
+    # Confusion matrix and F1 score
+    plot_confusion_matrix_and_score()
 
-    acc = history.history['accuracy']
-    val_acc = history.history['val_accuracy']
-    loss = history.history['loss']
-    val_loss = history.history['val_loss']
 
-    epochs = range(1, len(acc) + 1)
-
-    plt.plot(epochs, loss, 'bo', label='Training loss')
-    plt.plot(epochs, val_loss, 'b', label='Validation loss')
-    plt.title('Training and validation loss')
-    plt.legend()
-    plt.savefig(f"models/{model_name}/loss.png", format="png", dpi=1200)
-    plt.figure()
-
-    plt.plot(epochs, acc, 'bo', label='Training acc')
-    plt.plot(epochs, val_acc, 'b', label='Validation acc')
-    plt.title('Training and validation accuracy')
-    plt.legend()
-    plt.savefig(f"models/{model_name}/accuracy.png", format="png", dpi=1200)
+def plot_training_history(history):
+    plt.plot(history.history["accuracy"], color="red")
+    plt.plot(history.history["val_accuracy"], color="purple")
+    plt.title("model accuracy")
+    plt.ylabel("accuracy")
+    plt.xlabel("epoch")
+    plt.legend(["train", "test"], loc="upper left")
+    plt.savefig(f"models/{model_name}/accuracy.png", format="png", dpi=96)
     plt.figure()
     plt.show()
 
-    plot_confusion_matrix(model, val_gen, steps=len(df_val))
-
-
-def plot_confusion_matrix(model, generator, steps) -> None:
-    generator.shuffle = False
-
-    # Get true class labels
-    true_classes = generator.classes
-    class_labels = list(generator.class_indices.keys())
-
-    # Predict classes
-    predictions = model.predict(generator, steps=steps)
-    predicted_classes = np.argmax(predictions, axis=1)
-
-    # Generate the confusion matrix
-    cm = confusion_matrix(true_classes, predicted_classes, normalize='true')
-
-    # Plot the confusion matrix
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(cm, annot=True, fmt='.2f', xticklabels=class_labels, yticklabels=class_labels)
-    plt.title('Confusion Matrix')
-    plt.ylabel('True label')
-    plt.xlabel('Predicted label')
-    plt.savefig(f"models/{model_name}/confusion_matrix.png", format="png", dpi=1200)
+    plt.plot(history.history["loss"], color="green")
+    plt.plot(history.history["val_loss"], color="blue")
+    plt.title("model loss")
+    plt.ylabel("loss")
+    plt.xlabel("epoch")
+    plt.legend(["train", "test"], loc="upper left")
+    plt.savefig(f"models/{model_name}/loss.png", format="png", dpi=96)
+    plt.figure()
     plt.show()
+
+
+def plot_confusion_matrix_and_score():
+    best_model = load_model(f"models/{model_name}/{model_name}.hdf5")
+
+    y_true = np.concatenate([val_gen.next()[1] for _ in range(len(val_gen))])
+    y_pred = best_model.predict(val_gen, steps=len(val_gen))
+    y_pred_classes = np.argmax(y_pred, axis=1)
+    y_true_classes = np.argmax(y_true, axis=1)
+
+    # Calculate the confusion matrix
+    cm = confusion_matrix(y_true_classes, y_pred_classes, normalize='true')
+
+    # Plotting a normalized confusion matrix with improved label visibility
+    fig, ax = plt.subplots(figsize=(64, 64))
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=np.arange(len(val_gen.class_indices)))
+    disp.plot(include_values=False, cmap='viridis', ax=ax, xticks_rotation='vertical')
+    ax.set_title('Normalized Confusion Matrix')
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.savefig(f"models/{model_name}/normalized_confusion_matrix_improved.png", dpi=96)
+    plt.show()
+
+    # Evaluate the model to get validation loss and accuracy
+    val_loss, val_acc = best_model.evaluate(val_gen, steps=len(df_val))
+    print('Validation Loss:', val_loss)
+    print('Validation Accuracy:', val_acc)
+
+    # Calculate the F1 score
+    f1 = f1_score(y_true_classes, y_pred_classes, average='weighted')
+    print(f'F1 Score: {f1}')
 
 
 def predict() -> None:
@@ -225,9 +231,6 @@ if __name__ == "__main__":
                          "script again.")
         exit(0)
     else:
-
-        model_name = "mod_tuned"
-        os.makedirs(f"models/{model_name}", exist_ok=True)
         train_gen, val_gen, test_generator = preprocess()
         retrain_model()
         predict()
