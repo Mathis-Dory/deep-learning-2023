@@ -21,7 +21,7 @@ from kerastuner.tuners import RandomSearch
 set_random_seed(42)
 
 img_height, img_width = 64, 64
-batch_size = 32
+batch_size = 128
 train_path = "./data/train_images/"
 val_path = "./data/val_images/"
 test_path = "./data/test_images/"
